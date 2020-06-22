@@ -1,8 +1,8 @@
 package me.sat7.dynamicshop.guis;
 
 import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 import org.bukkit.Bukkit;
@@ -23,6 +23,17 @@ import me.sat7.dynamicshop.utilities.LangUtil;
 import me.sat7.dynamicshop.utilities.ShopUtil;
 
 public class Shop {
+
+    private HashMap<UUID, Long> cacheValid = new HashMap<>();
+    private HashMap<UUID, ArrayList<String>> cache = new HashMap<>();
+
+    public boolean playerCacheValid(Player player) {
+        return cacheValid.containsKey(player.getUniqueId()) && cacheValid.get(player.getUniqueId()) > System.currentTimeMillis();
+    }
+
+    public boolean isCached(Player player, String str) {
+        return cache.containsKey(player.getUniqueId()) && cache.get(player.getUniqueId()).contains(str);
+    }
 
     public Inventory getGui(Player player, String shopName, int page) {
         DecimalFormat df = new DecimalFormat("0.00");
@@ -135,6 +146,13 @@ public class Shop {
         ItemStack infoBtn =  ItemsUtil.createItemStack(Material.LEGACY_SIGN,null, "§3"+shopName, infoLore,1);
         inventory.setItem(53,infoBtn);
 
+
+        int skipped = 0;
+        if(!playerCacheValid(player))
+            cache.put(player.getUniqueId(), new ArrayList<>());
+
+        Random rand = new Random();
+
         // 상품목록 등록
         for (String s: ShopUtil.ccShop.get().getConfigurationSection(shopName).getKeys(false))
         {
@@ -144,6 +162,17 @@ public class Shop {
                 int idx = Integer.parseInt(s);
                 idx -= ((page-1)*45);
                 if(!(idx < 45 && idx >= 0)) continue;
+
+                if(playerCacheValid(player) || !isCached(player, s)) {
+                    skipped++;
+                    continue;
+                }
+
+                //If this is a chance occurance and the random value is not met...
+                if(ShopUtil.ccShop.get().contains(shopName + "." + s + ".chance") && !(ShopUtil.ccShop.get().getDouble(shopName + "." + s + ".chance") < rand.nextDouble() * 100)) {
+                    skipped++;
+                    continue;
+                }
 
                 // 아이탬 생성
                 String itemName = ShopUtil.ccShop.get().getString(shopName +"."+s+".mat"); // 메테리얼
@@ -178,10 +207,10 @@ public class Shop {
                     double buyPrice2 = ShopUtil.ccShop.get().getDouble(shopName+"." + s + ".value");
                     double priceSave1 = ((buyPrice/buyPrice2)*100)-100;
                     double priceSave2 = 100-((buyPrice/buyPrice2)*100);
-                    
+
                     String valueChangedRange = null;
                 	String valueChangedRange2 = null;
-                	
+
                     if(buyPrice - buyPrice2 > 0) {
                     	valueChangedRange = "§a⬆ " + Math.round(priceSave1*100d)/100d + "%";
                     	valueChangedRange2 = "§a⬆ " + Math.round(priceSave1*100d)/100d + "%";
@@ -236,7 +265,9 @@ public class Shop {
 
                 meta.setLore(lore);
                 itemStack.setItemMeta(meta);
-                inventory.setItem(idx,itemStack);
+                //TODO Make this not show up if "chance" is not met
+                cache.get(player.getUniqueId()).add(s);
+                inventory.setItem(idx - skipped, itemStack);
             }
             catch (Exception e)
             {
@@ -250,6 +281,10 @@ public class Shop {
                 }
             }
         }
+
+        if(!playerCacheValid(player))
+            cacheValid.put(player.getUniqueId(), System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30)); // Set cache for 30 seconds.
+
         return inventory;
     }
 }
